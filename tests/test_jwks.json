@@ -1,0 +1,24 @@
+{
+    "keys": [{
+        "alg": "RS256",
+        "e": "AQAB",
+        "kid": "my-test-key",
+        "kty": "RSA",
+        "n": "AMGiv_IkrDYML4Tf6xxPJIBQ0_bnS3sEhYJ_gxjOg8OUlLWSAAaZxO-OlHMIrYZ8Z1CpwdoY-AsX8cR7l2U8bOVqUSMf_Ruf-tU1JTCUKuAeUj0hXEe5027P3OIKnOmwQQHmVCEeUqd9FRqssdLhlzYLvDs8i8sDaosBy8ke6ikeLrVYjVjYIDdSuYD4dkWV_ImpVzuQ4TkgclbzL9-b776ZiGfaftYx13HuUcJ22CGHtse88Ba-uzoQbWKISjNOtANpF__zvy-9KWWoUCksZCaXrNXrmZXPDdxpk4Po9LiHKI_zetH33O5h1-O189fKvddBhtfpX-Qf9l7eGwMEWac",
+        "use": "sig"
+    },{
+        "alg": "RS256",
+        "e": "AQAB",
+        "kid": "BMLq2Z9km8EjG3CfsnNk0DQW9rFD6AWQxPAmWAO75Hs=",
+        "kty": "RSA",
+        "n": "wQSDNYLf0jhK8H0QgtlGjTy9PoJekhe8hNhOMOazQlDQbUhQwFf3l1UYC4xko5ovCId27bOt0seUKiTHRZrXueyWBOfP-mewBOdAnyGF8-HPRRzFi4M8LAro0bqnHH6jcFvYVyyvT5_dQUS7SRHOMk95tyW-2qeqGanyYd7haeEWhMG5rQIqvoYK9HN2iENpVg7dd3-YoykixqcEOUMJGeaL5pIrnhQBSYeOEOzmZWMiDcIp8Fye5nYc0KDyqcmB0cDjwxWQNpw0yHE67sEuYEAydHCPvJqlD_LlrKjg-EXRnQz38YhYSgYA6yc4gDqt68yDJwNNYVVOzSzIbTfodQ",
+        "use": "sig"
+    }, {
+        "alg": "RS256",
+        "e": "AQAB",
+        "kid": "Pp+/LoFQ+B11O5+AwuPGlx2OnwFO5McILaXXKZJEfAM=",
+        "kty": "RSA",
+        "n": "1JtflUft1bgb8gTeS0qhyJC-AxzyEo56aCCXzww4oxiyntIwe7THID5TnpmcC5CtsV5Fs-mZuJHjTTc8BWUr2urksajB3djgD3-gqQ0rgBATsR1CtrHEZOFDPV8G-FEt53DvLnGr7fxMjs_EBnlSw-6CAVbTKVBGB_8JtAmAMMrORG7IIdrQ2wmuoZ1e3btgEAZmlWBQFK8kNOOzkmOJNlxmgJjPtohWlNqRMbcDhb6omsD45yU9yYJYUB1q3KGw-nwl0K43Vj1iU3EtbR0DrLsPOEOWF70Q9M-M-okC0mKy8oNlxzRo46h1gXaEGKdx3wJ9AyKnh_Fk62rxHRc0-w",
+        "use": "sig"
+    }]
+}
