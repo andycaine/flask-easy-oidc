@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 import json
 import os
 
@@ -78,16 +79,8 @@ def client(app):
 
 @pytest.fixture
 def rsps():
-    with responses.RequestsMock() as rsps:
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         yield rsps
-
-
-@pytest.fixture
-def valid_callback_session(client):
-    with client.session_transaction() as sess:
-        sess['state'] = state
-        sess['code_verifier'] = code_verifier
-        sess['next_path'] = '/dashboard'
 
 
 @pytest.fixture
@@ -136,7 +129,7 @@ def token_endpoint_failure(rsps):
 
 @pytest.fixture
 def expired_token_response(rsps):
-    five_mins_ago = datetime.now(UTC) - timedelta(minutes=5)
+    five_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
     yield rsps.post(
         token_endpoint,
         json={
@@ -174,9 +167,13 @@ def missing_required_claim_token_response(rsps):
     )
 
 
+def now():
+    return datetime.now(timezone.utc)
+
+
 @pytest.fixture
 def iat_in_future_token_response(rsps):
-    claims = create_claims(auth_time=datetime.now(UTC) + timedelta(minutes=5))
+    claims = create_claims(auth_time=now() + timedelta(minutes=5))
     yield rsps.post(
         token_endpoint,
         json={
@@ -186,7 +183,8 @@ def iat_in_future_token_response(rsps):
     )
 
 
-def create_claims(auth_time=datetime.now(UTC), aud=client_id, iss=issuer):
+def create_claims(auth_time=now(), aud=client_id,
+                  iss=issuer):
     auth_time_ts = int(auth_time.timestamp())
     return {
         'at_hash': 'c5xznp5DMm0DxkAg765i6w',
@@ -228,9 +226,14 @@ class MockHttpResponse:
         pass
 
 
-def test_login(client, monkeypatch):
-    tokens = [code_verifier, state]
-    monkeypatch.setattr('secrets.token_urlsafe', lambda _: tokens.pop())
+@pytest.fixture
+def mock_secret_tokens():
+    tokens = [state, code_verifier]
+    with patch('secrets.token_urlsafe', side_effect=tokens) as mock:
+        yield mock
+
+
+def test_login(client, mock_secret_tokens):
 
     with client:
         response = client.get('/auth/login?next=%2Fdashboard')
@@ -247,24 +250,42 @@ def test_login(client, monkeypatch):
         assert session['code_verifier'] == code_verifier
         assert session['next_path'] == '/dashboard'
 
+    mock_secret_tokens.assert_called_with(nbytes=32)
+
 
 def test_login_with_open_redirect(client):
     response = client.get('/auth/login?next=https%3A%2F%2Fevil.com')
     assert response.status_code == 400
 
 
+def oidc_callback_cookies(state_cookie=state, code_verifer=code_verifier,
+                          next_path='/dashboard'):
+    return {
+        'state': state_cookie,
+        'code_verifier': code_verifer,
+        'next_path': next_path
+    }
+
+
+def do_oidc_callback(client, cookies=oidc_callback_cookies(),
+                     params=f'?state={state_hash}&code=test_code'):
+    with client.session_transaction() as sess:
+        for k, v in cookies.items():
+            sess[k] = v
+    return client.get(f'/auth/oidc{params}')
+
+
 @freezegun.freeze_time()
-def test_valid_oidc_callback(client, valid_token_response,
-                             valid_callback_session):
+def test_valid_oidc_callback(client, valid_token_response):
     with client:
-        response = client.get(f'/auth/oidc?state={state_hash}&code=test_code')
+        response = do_oidc_callback(client)
         assert response.status_code == 302
         assert response.headers['Location'] == '/dashboard'
         assert session['oidc_user_id'] == sub
         assert session['oidc_email'] == 'test@example.com'
         assert session['oidc_groups'] == groups_claim
         assert session['oidc_name'] == name_claim
-        assert session['oidc_auth_at'] == datetime.now(UTC)
+        assert session['oidc_auth_at'] == now()
         assert 'state' not in session
         assert 'code_verifier' not in session
         assert 'next_path' not in session
@@ -276,85 +297,95 @@ def test_valid_oidc_callback(client, valid_token_response,
     assert headers['Content-Type'] == 'application/x-www-form-urlencoded'
 
 
-def test_oidc_no_state_param(client, valid_callback_session):
-    assert client.get('/auth/oidc?code=test_code').status_code == 400
+def test_oidc_no_state_param(client, valid_token_response):
+    response = do_oidc_callback(client, params='?code=test_code')
+    assert response.status_code == 400
 
 
-def test_oidc_no_code_param(client, valid_callback_session):
-    assert client.get(f'/auth/oidc?state={state}').status_code == 400
+def test_oidc_no_code_param(client, valid_token_response):
+    response = do_oidc_callback(client, params=f'?state={state_hash}')
+    assert response.status_code == 400
 
 
-def test_oidc_invalid_state_param(client, valid_callback_session):
-    assert client.get('/auth/oidc?state=abc&code=test_code').status_code == 400
+def test_oidc_invalid_state_param(client, valid_token_response):
+    response = do_oidc_callback(client, params='?state=abc&code=test_code')
+    assert response.status_code == 400
 
 
-def test_oidc_csrf_state_defence(client, valid_callback_session):
-    another_state_hash = 'xxxxxxrayvMY6NjGFl5QbD-R4ndmgLrk8iG9NLNUPKU'
-    assert client.get(f'/auth/oidc?state={another_state_hash}&code=test_code')\
-        .status_code == 400
+@pytest.mark.parametrize('state_hash', [
+    'aaaaaarayvMY6NjGFl5QbD-R4ndmgLrk8iG9NLNUPKU',
+    '',
+    'zzzzzzrayvMY6NjGFl5QbD-R4ndmgLrk8iG9NLNUPKU'
+])
+def test_oidc_csrf_state_defence(client, state_hash, valid_token_response):
+    response = do_oidc_callback(
+        client,
+        params=f'?state={state_hash}&code=test_code'
+    )
+    assert response.status_code == 400
+    assert valid_token_response.call_count == 0
 
 
-def test_oidc_missing_state_cookie(client, valid_callback_session):
-    with client.session_transaction() as sess:
-        del sess['state']
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 400
+def test_oidc_missing_state_cookie(client, valid_token_response):
+    cookies = oidc_callback_cookies()
+    del cookies['state']
+    response = do_oidc_callback(client, cookies=cookies)
+    assert response.status_code == 400
+    assert valid_token_response.call_count == 0
 
 
-def test_oidc_missing_code_verifier(client, valid_callback_session):
-    with client.session_transaction() as sess:
-        del sess['code_verifier']
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 400
+def test_oidc_missing_code_verifier(client, valid_token_response):
+    cookies = oidc_callback_cookies()
+    del cookies['code_verifier']
+    response = do_oidc_callback(client, cookies=cookies)
+    assert response.status_code == 400
+    assert valid_token_response.call_count == 0
 
 
-def test_oidc_missing_open_redirect(client, valid_callback_session):
-    with client.session_transaction() as sess:
-        sess['next_path'] = 'https://evil.com'
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 400
+def test_oidc_open_redirect(client, valid_token_response):
+    cookies = oidc_callback_cookies(next_path='https://evil.com')
+    response = do_oidc_callback(client, cookies=cookies)
+    assert response.status_code == 400
+    assert valid_token_response.call_count == 0
 
 
-def test_oidc_token_endpoint_failure(client, valid_callback_session,
-                                     token_endpoint_failure):
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 401
+def test_oidc_token_endpoint_failure(client, token_endpoint_failure):
+    response = do_oidc_callback(client)
+    assert response.status_code == 401
 
 
-def test_oidc_expired_token(client, valid_callback_session,
-                            expired_token_response):
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 401
+def test_oidc_expired_token(client, expired_token_response):
+    response = do_oidc_callback(client)
+    assert response.status_code == 401
 
 
-def test_oidc_tampered_token(client, valid_callback_session,
-                             tampered_token_response):
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 401
+def test_oidc_tampered_token(client, tampered_token_response):
+    response = do_oidc_callback(client)
+    assert response.status_code == 401
 
 
-def test_oidc_missing_required_claim(client, valid_callback_session,
+def test_oidc_missing_required_claim(client,
                                      missing_required_claim_token_response):
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 401
+    response = do_oidc_callback(client)
+    assert response.status_code == 401
 
 
-def test_oidc_wrong_aud(client, valid_callback_session,
+def test_oidc_wrong_aud(client,
                         wrong_aud_token_response):
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 401
+    response = do_oidc_callback(client)
+    assert response.status_code == 401
 
 
-def test_oidc_wrong_iss(client, valid_callback_session,
+def test_oidc_wrong_iss(client,
                         wrong_iss_token_response):
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 401
+    response = do_oidc_callback(client)
+    assert response.status_code == 401
 
 
-def test_oidc_iat_in_future(client, valid_callback_session,
+def test_oidc_iat_in_future(client,
                             iat_in_future_token_response):
-    assert client.get(f'/auth/oidc?state={state_hash}&code=test_code')\
-        .status_code == 401
+    response = do_oidc_callback(client)
+    assert response.status_code == 401
 
 
 def test_logout(client):
@@ -362,7 +393,7 @@ def test_logout(client):
         sess['user_id'] = '26c24244-c0a1-7086-6af4-4b1eaf153b89'
         sess['groups'] = groups_claim
         sess['name'] = name_claim
-        sess['iat'] = datetime.now(UTC) + timedelta(minutes=60)
+        sess['iat'] = now() + timedelta(minutes=60)
     with client:
         response = client.get('/auth/logout')
         assert response.status_code == 302

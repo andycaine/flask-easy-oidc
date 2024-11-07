@@ -5,7 +5,6 @@ import re
 import secrets
 import urllib.parse
 
-
 from flask import (
     session, request, Flask, current_app, redirect, Blueprint, abort
 )
@@ -77,21 +76,27 @@ def oidc():
     state_param = request.args.get('state', '')
 
     if not is_urlsafe_32_byte_token(state_param):
+        print(f'Invalid state parameter: {state_param}')
         abort(400)
 
     state_cookie = session.pop('state', '')
     if not is_urlsafe_32_byte_token(state_cookie):
+        print(f'Invalid state cookie: {state_cookie}')
         abort(400)
 
     if not s256_match(state_cookie, state_param):
+        print(f'CSRF check failed - state_cookie: {state_cookie}, '
+              f'state_param: {state_param}')
         abort(400)
 
     code_param = request.args.get('code')
     if not code_param:
+        print('Missing code parameter')
         abort(400)
 
     code_verifier = session.pop('code_verifier', '')
     if not is_urlsafe_32_byte_token(code_verifier):
+        print(f'Invalid code verifier: {code_verifier}')
         abort(400)
 
     next_path = urllib.parse.unquote_plus(
@@ -99,6 +104,7 @@ def oidc():
     )
     if urllib.parse.urlparse(next_path).netloc:
         # all redirects should be relative here
+        print(f'Open redirect attempted: {next_path}')
         abort(400)
 
     client_id = current_app.config['CLIENT_ID']
@@ -129,7 +135,7 @@ def oidc():
         id_token = auth_token['id_token']
         claims = decode(id_token)
     except Exception as e:
-        print(e)
+        print(f'Error during token exchange / decoding: {e}')
         abort(401)
 
     session['oidc_user_id'] = claims['sub']
@@ -139,7 +145,7 @@ def oidc():
     session['oidc_groups'] = claims.get(groups_claim, [])
     name_claim = current_app.config.get('NAME_CLAIM', 'name')
     session['oidc_name'] = claims.get(name_claim, '')
-    session['oidc_auth_at'] = datetime.datetime.now(datetime.UTC)
+    session['oidc_auth_at'] = datetime.datetime.now(datetime.timezone.utc)
 
     return redirect(next_path)
 
@@ -177,8 +183,8 @@ def s256_hash(s):
     return base64.urlsafe_b64encode(h).rstrip(b'=').decode('ascii')
 
 
-def s256_pair(nbytes=32):
-    s = secrets.token_urlsafe(nbytes)
+def s256_pair():
+    s = secrets.token_urlsafe(nbytes=32)
     return s, s256_hash(s)
 
 
