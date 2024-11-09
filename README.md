@@ -1,6 +1,6 @@
 # flask-easy-oidc
 
-Create simple invoices.
+OIDC client endpoints.
 
 ## Description
 
