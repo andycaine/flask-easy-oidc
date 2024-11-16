@@ -168,12 +168,12 @@ def logout():
 class OidcExtension:
 
     def __init__(self, app=None, url_prefix='/auth'):
-        self.jwks_client = jwt.PyJWKClient(app.config['KEYS_URL'])
         self.url_prefix = url_prefix
         if app is not None:
             self.init_app(app)
 
     def init_app(self, app):
+        self.jwks_client = jwt.PyJWKClient(app.config['KEYS_URL'])
         app.register_blueprint(blueprint, url_prefix=self.url_prefix)
         app.extensions['oidc'] = self
 
