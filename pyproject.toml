@@ -1,9 +1,9 @@
 [project]
 name = "flask-easy-oidc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Flask extension for an OIDC client."
 dependencies = [
-    "click", "flask", "requests", "PyJWT", "cryptography"
+    "click", "flask", "requests", "PyJWT", "cryptography", "opentelemetry-api"
 ]
 readme = "README.md"
 license = {text = "MIT License"}

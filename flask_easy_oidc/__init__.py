@@ -11,9 +11,20 @@ from flask import (
 import requests
 import requests.auth
 import jwt
+from opentelemetry import trace
 
 
 __all__ = ['create_app', 'OidcExtension', 'blueprint']
+
+tracer = trace.get_tracer(__name__)
+OTEL_NAMESPACE = 'com.andycaine.flask_easy_oidc'
+NEXT_PATH = f'{OTEL_NAMESPACE}.next_path'
+MALICIOUS_REDIRECT = f'{OTEL_NAMESPACE}.malicious_redirect'
+INPUT_VALIDATION_FAIL = f'{OTEL_NAMESPACE}.input_validation_fail'
+MALICIOUS_CSRF = f'{OTEL_NAMESPACE}.malicious_csrf'
+OIDC_TOKEN_ENDPOINT_FAILURE = f'{OTEL_NAMESPACE}.oidc_token_endpoint_failure'
+OIDC_TOKEN_DECODE_FAILURE = f'{OTEL_NAMESPACE}.oidc_token_decode_failure'
+OIDC_TOKEN_UNKNOWN_FAILURE = f'{OTEL_NAMESPACE}.oidc_token_unknown_failure'
 
 
 def create_app():
@@ -27,13 +38,20 @@ def create_app():
 blueprint = Blueprint('oidc', __name__)
 
 
+def _set_span_attr(k, v):
+    trace.get_current_span().set_attribute(k, v)
+
+
 @blueprint.get('/login')
 def login():
     next_path = urllib.parse.unquote_plus(
         request.args.get('next', '/')
     )
+    _set_span_attr('next_path', next_path)
+
     if urllib.parse.urlparse(next_path).netloc:
         # all redirects should be relative here
+        _set_span_attr(MALICIOUS_REDIRECT, next_path)
         abort(400)
 
     state, state_sha256 = s256_pair()
@@ -75,36 +93,37 @@ def oidc():
 
     state_param = request.args.get('state', '')
 
+    span = trace.get_current_span()
     if not is_urlsafe_32_byte_token(state_param):
-        print(f'Invalid state parameter: {state_param}')
+        span.set_attribute(INPUT_VALIDATION_FAIL, 'state')
         abort(400)
 
     state_cookie = session.pop('state', '')
     if not is_urlsafe_32_byte_token(state_cookie):
-        print(f'Invalid state cookie: {state_cookie}')
+        span.set_attribute(INPUT_VALIDATION_FAIL, 'state_cookie')
         abort(400)
 
     if not s256_match(state_cookie, state_param):
-        print(f'CSRF check failed - state_cookie: {state_cookie}, '
-              f'state_param: {state_param}')
+        span.set_attribute('malicious_csrf', True)
         abort(400)
 
     code_param = request.args.get('code')
     if not code_param:
-        print('Missing code parameter')
+        span.set_attribute(INPUT_VALIDATION_FAIL, 'code')
         abort(400)
 
     code_verifier = session.pop('code_verifier', '')
     if not is_urlsafe_32_byte_token(code_verifier):
-        print(f'Invalid code verifier: {code_verifier}')
+        span.set_attribute(INPUT_VALIDATION_FAIL, 'code_verifer')
         abort(400)
 
     next_path = urllib.parse.unquote_plus(
         session.pop('next_path', '/')
     )
+    span.set_attribute(NEXT_PATH, next_path)
     if urllib.parse.urlparse(next_path).netloc:
         # all redirects should be relative here
-        print(f'Open redirect attempted: {next_path}')
+        span.set_attribute(MALICIOUS_REDIRECT, next_path)
         abort(400)
 
     client_id = current_app.config['CLIENT_ID']
@@ -134,11 +153,21 @@ def oidc():
 
         id_token = auth_token['id_token']
         claims = decode(id_token)
+    except requests.exceptions.HTTPError as e:
+        span.record_exception(e)
+        span.set_attribute(OIDC_TOKEN_ENDPOINT_FAILURE, str(e))
+        abort(401)
+    except jwt.exceptions.PyJWTError as e:
+        span.record_exception(e)
+        span.set_attribute(OIDC_TOKEN_DECODE_FAILURE, str(e))
+        abort(401)
     except Exception as e:
-        print(f'Error during token exchange / decoding: {e}')
+        span.record_exception(e)
+        span.set_attribute(OIDC_TOKEN_UNKNOWN_FAILURE, str(e))
         abort(401)
 
     session['oidc_user_id'] = claims['sub']
+    span.set_attribute('user.id', claims['sub'])
     email_claim = current_app.config.get('EMAIL_CLAIM', 'email')
     session['oidc_email'] = claims.get(email_claim, '')
     groups_claim = current_app.config.get('GROUPS_CLAIM', 'groups')
@@ -147,11 +176,19 @@ def oidc():
     session['oidc_name'] = claims.get(name_claim, '')
     session['oidc_auth_at'] = datetime.datetime.now(datetime.timezone.utc)
 
+    span.add_event(f'{OTEL_NAMESPACE}.user_authenticated', {
+        'user.id': claims['sub'],
+        'email': claims.get(email_claim, ''),
+        'groups': claims.get(groups_claim, []),
+        'name': claims.get(name_claim, '')
+    })
     return redirect(next_path)
 
 
 @blueprint.get('/logout')
 def logout():
+    user = session.get('oidc_user_id', '')
+    _set_span_attr('user.id', user)
     session.clear()
 
     client_id = current_app.config['CLIENT_ID']
