@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+import time
 import json
 import os
 
@@ -8,10 +9,11 @@ import jwt.api_jwk
 import pytest
 import responses
 import freezegun
-from flask import session
+from flask import session, Flask
 import responses.matchers
 
-import flask_easy_oidc
+from flask_easy_oidc import OidcExtension, AuthzResult
+from flask import request
 
 client_id = 'test_client_id'
 client_secret = 'test_client_secret'
@@ -44,7 +46,7 @@ private_key = readrel('test_private_key.pem').encode('utf-8')
 
 
 @pytest.fixture
-def app(monkeypatch):
+def envvars(monkeypatch):
     monkeypatch.setenv('OIDC_SECRET_KEY', 'super secret')
     monkeypatch.setenv('OIDC_REDIRECT_URL', redirect_url)
     monkeypatch.setenv('OIDC_CLIENT_ID', client_id)
@@ -61,14 +63,44 @@ def app(monkeypatch):
     monkeypatch.setenv('OIDC_GROUPS_CLAIM', 'cognito:groups')
     monkeypatch.setenv('OIDC_NAME_CLAIM', 'name')
 
+
+@pytest.fixture
+def stub_keys_url(monkeypatch):
     def stub_urlopen(request, **_):
         if request.full_url == keys_url:
             return MockHttpResponse(json.dumps(jwks).encode('utf-8'))
         raise Exception('stub_urlopen: Unstubbed URL: ' + request.full_url)
-
     monkeypatch.setattr('urllib.request.urlopen', stub_urlopen)
+    return stub_urlopen
 
-    app = flask_easy_oidc.create_app()
+
+@pytest.fixture
+def app(monkeypatch, envvars, stub_keys_url):
+    app = Flask(__name__)
+    app.config.from_prefixed_env(prefix='OIDC')
+
+    def authorizer():
+        result = AuthzResult.DENY
+        if request.path == '/admin':
+            if 'Admin' in session['oidc_groups']:
+                result = AuthzResult.ALLOW
+        return result
+
+    OidcExtension(app=app, url_prefix='/auth', public_paths=['/public'],
+                  authorizer=authorizer)
+
+    @app.get('/public')
+    def public():
+        return 'public'
+
+    @app.get('/admin')
+    def admin():
+        return 'admin'
+
+    @app.get('/secure')
+    def secure():
+        return 'secure'
+
     yield app
 
 
@@ -285,7 +317,7 @@ def test_valid_oidc_callback(client, valid_token_response):
         assert session['oidc_email'] == 'test@example.com'
         assert session['oidc_groups'] == groups_claim
         assert session['oidc_name'] == name_claim
-        assert session['oidc_auth_at'] == now()
+        assert session['oidc_auth_at'] == int(time.time())
         assert 'state' not in session
         assert 'code_verifier' not in session
         assert 'next_path' not in session
@@ -402,3 +434,76 @@ def test_logout(client):
             '&logout_uri=https%3A%2F%2Fauth.example.com%2Flogin'
         assert response.headers['Location'] == redirect
         assert list(session.keys()) == []
+
+
+def test_get_public_url_without_login(client):
+    response = client.get('/public')
+    assert response.status_code == 200
+
+
+def test_get_non_public_url_without_login(client):
+    response = client.get('/secure')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/auth/login?next=/secure'
+
+
+def test_get_url_allowed_by_pdp(client):
+    with client.session_transaction() as sess:
+        sess['oidc_user_id'] = sub
+        sess['oidc_groups'] = ['Admin']
+        sess['oidc_auth_at'] = int(time.time())
+
+    response = client.get('/admin')
+    assert response.status_code == 200
+
+
+def test_get_url_not_allowed_by_pdp(client):
+    with client.session_transaction() as sess:
+        sess['oidc_user_id'] = sub
+        sess['oidc_groups'] = ['User']
+        sess['oidc_auth_at'] = int(time.time())
+
+    response = client.get('/admin')
+    assert response.status_code == 403
+
+
+@freezegun.freeze_time()
+def test_authorized_request_updates_last_accessed(client):
+    five_mins_ago = int(time.time() - 5 * 60)
+    with client.session_transaction() as sess:
+        sess['oidc_user_id'] = sub
+        sess['oidc_groups'] = ['Admin']
+        sess['oidc_auth_at'] = five_mins_ago
+        sess['oidc_la'] = five_mins_ago
+
+    with client:
+        response = client.get('/admin')
+        assert response.status_code == 200
+        assert session['oidc_la'] == int(time.time())
+        assert session['oidc_auth_at'] == five_mins_ago
+
+
+@freezegun.freeze_time()
+def test_session_timeout(client):
+    with client.session_transaction() as sess:
+        sess['oidc_user_id'] = sub
+        sess['oidc_groups'] = ['Admin']
+        sess['oidc_auth_at'] = int(time.time() - 20 * 60)
+        sess['oidc_la'] = int(time.time() - 15 * 60) - 1
+
+    response = client.get('/admin')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/auth/login?next=/admin'
+
+
+@freezegun.freeze_time()
+def test_session_expiry(client):
+    with client.session_transaction() as sess:
+        sess['oidc_user_id'] = sub
+        sess['oidc_groups'] = ['Admin']
+        sess['oidc_auth_at'] = int(time.time() - 60 * 60) - 1
+        sess['oidc_la'] = int(time.time())
+
+    response = client.get('/admin')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/auth/login?next=/admin'

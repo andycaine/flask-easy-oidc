@@ -1,8 +1,9 @@
 import base64
-import datetime
+import enum
 import hashlib
 import re
 import secrets
+import time
 import urllib.parse
 
 from flask import (
@@ -174,7 +175,7 @@ def oidc():
     session['oidc_groups'] = claims.get(groups_claim, [])
     name_claim = current_app.config.get('NAME_CLAIM', 'name')
     session['oidc_name'] = claims.get(name_claim, '')
-    session['oidc_auth_at'] = datetime.datetime.now(datetime.timezone.utc)
+    session['oidc_auth_at'] = int(time.time())
 
     span.add_event(f'{OTEL_NAMESPACE}.user_authenticated', {
         'user.id': claims['sub'],
@@ -202,17 +203,61 @@ def logout():
     return redirect(logout_request)
 
 
+class AuthzResult(enum.Enum):
+    ALLOW = 1
+    DENY = 2
+
+
+def deny_all():
+    return AuthzResult.DENY
+
+
 class OidcExtension:
 
-    def __init__(self, app=None, url_prefix='/auth'):
+    def __init__(self, app=None, url_prefix='/auth', public_paths=[],
+                 authorizer=deny_all):
         self.url_prefix = url_prefix
+        self.public_paths = public_paths + [
+            f'{self.url_prefix}/login',
+            f'{self.url_prefix}/logout',
+            f'{self.url_prefix}/oidc'
+        ]
+        self.authorizer = authorizer
         if app is not None:
             self.init_app(app)
 
     def init_app(self, app):
         self.jwks_client = jwt.PyJWKClient(app.config['KEYS_URL'])
         app.register_blueprint(blueprint, url_prefix=self.url_prefix)
+        app.before_request(self.before_request)
         app.extensions['oidc'] = self
+
+    def redirect_to_login(self):
+        return redirect(f'{self.url_prefix}/login?next={request.path}')
+
+    def before_request(self):
+        if request.path in self.public_paths:
+            return
+        if 'oidc_user_id' not in session:
+            self.redirect_to_login()
+
+        auth_at = session.get('oidc_auth_at', 0)
+
+        session_exp_mins = current_app.config.get('SESSION_EXPIRY_MINS', 60)
+        if auth_at < int(time.time()) - session_exp_mins * 60:
+            session.clear()
+            self.redirect_to_login()
+
+        last_accessed = session.get('oidc_la', auth_at)
+        session_timeout_mins = current_app.config.get('SESSION_TIMEOUT_MINS',
+                                                      15)
+        if last_accessed < int(time.time()) - session_timeout_mins * 60:
+            session.clear()
+            return self.redirect_to_login()
+
+        session['oidc_la'] = int(time.time())
+        if self.authorizer() != AuthzResult.ALLOW:
+            abort(403)
 
 
 def s256_hash(s):
