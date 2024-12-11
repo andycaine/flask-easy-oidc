@@ -12,7 +12,7 @@ import freezegun
 from flask import session, Flask
 import responses.matchers
 
-from flask_easy_oidc import OidcExtension, AuthzResult
+from flask_oidc_auth import OidcExtension, AuthzResult
 from flask import request
 
 client_id = 'test_client_id'

@@ -1,5 +1,4 @@
 pytest
--e .
 responses
 freezegun
 cosmic-ray

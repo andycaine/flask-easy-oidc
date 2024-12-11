@@ -1,18 +1,19 @@
 [project]
-name = "flask-easy-oidc"
+name = "flask-oidc-auth"
 version = "0.2.0"
 description = "Flask extension for an OIDC client."
 dependencies = [
-    "click", "flask", "requests", "PyJWT", "cryptography", "opentelemetry-api"
+    "click", "flask", "requests", "PyJWT", "cryptography", "opentelemetry-api",
+    "opentelemetry-semantic-conventions"
 ]
 readme = "README.md"
 license = {text = "MIT License"}
-keywords = ["oidc"]
+keywords = ["oidc", "authentication", "authorization"]
 
 [project.urls]
-Homepage = "https://github.com/andycaine/flask-easy-oidc"
-Documentation = "https://github.com/andycaine/flask-easy-oidc?tab=readme-ov-file"
-Repository = "https://github.com/andycaine/flask-easy-oidc.git"
+Homepage = "https://github.com/andycaine/flask-oidc-auth"
+Documentation = "https://github.com/andycaine/flask-oidc-auth?tab=readme-ov-file"
+Repository = "https://github.com/andycaine/flask-oidc-auth.git"
 
 [build-system]
 requires = ["setuptools>=61.0"]

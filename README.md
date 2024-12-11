@@ -1,30 +1,30 @@
-# flask-easy-oidc
+# flask-oidc-auth
 
 OIDC client endpoints.
 
 ## Description
 
-`flask-easy-oidc` lets you easily deploy a set of endpoints to integrate with an OIDC-compliant IdP - either as a standalone app or as part of an existing app.
+`flask-oidc-auth` lets you easily deploy a set of endpoints to integrate with an OIDC-compliant IdP - either as a standalone app or as part of an existing app.
 
 ## Getting started
 
 Install using pip:
 
 ```bash
-pip install flask-easy-oidc
+pip install flask-oidc-auth
 ```
 
 Then run as a standalone app:
 
 ```bash
-flask --app flask_easy_oidc --debug run
+flask --app flask_oidc_auth --debug run
 ```
 
 Or as an extension in an existing app:
 
 ```python
 from flask import Flask
-from flask_easy_oidc import OidcExtension
+from flask_oidc_auth import OidcExtension
 
 app = Flask(__name__)
 
