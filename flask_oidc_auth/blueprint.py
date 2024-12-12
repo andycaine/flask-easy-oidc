@@ -65,7 +65,7 @@ def is_urlsafe_32_byte_token(token):
 def get_signing_key(token):
     jwks_client = current_app.extensions['oidc'].jwks_client
     signing_key = jwks_client.get_signing_key_from_jwt(token)
-    return signing_key.key
+    return signing_key
 
 
 @tracer.start_as_current_span('decode_jwt')
