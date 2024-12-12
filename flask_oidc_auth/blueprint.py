@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import json
 import re
 import secrets
 import time
@@ -13,10 +12,13 @@ import requests
 import requests.auth
 import jwt
 from opentelemetry import trace
+from opentelemetry.semconv._incubating.attributes import user_attributes
+
 
 from . import spanattrs
 
 
+tracer = trace.get_tracer(__name__)
 blueprint = Blueprint('oidc', __name__)
 
 
@@ -59,16 +61,18 @@ def is_urlsafe_32_byte_token(token):
     return bool(re.match(r'^[A-Za-z0-9\-_]{43}$', token))
 
 
+@tracer.start_as_current_span('decode_jwt')
+def decode(token):
+    jwks_client = current_app.extensions['oidc'].jwks_client
+    signing_key = jwks_client.get_signing_key_from_jwt(token)
+    return jwt.decode(token, signing_key.key,
+                      audience=current_app.config['CLIENT_ID'],
+                      issuer=current_app.config['ISSUER'],
+                      algorithms=["RS256"], options={'require': ['sub']})
+
+
 @blueprint.get('/oidc')
 def oidc():
-
-    def decode(token):
-        jwks_client = current_app.extensions['oidc'].jwks_client
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-        return jwt.decode(token, signing_key.key,
-                          audience=current_app.config['CLIENT_ID'],
-                          issuer=current_app.config['ISSUER'],
-                          algorithms=["RS256"], options={'require': ['sub']})
 
     state_param = request.args.get('state', '')
 
@@ -83,7 +87,7 @@ def oidc():
         abort(400)
 
     if not s256_match(state_cookie, state_param):
-        span.set_attribute('malicious_csrf', True)
+        span.set_attribute(spanattrs.MALICIOUS_CSRF, True)
         abort(400)
 
     code_param = request.args.get('code')
@@ -145,8 +149,6 @@ def oidc():
         span.set_attribute(spanattrs.OIDC_TOKEN_UNKNOWN_FAILURE, str(e))
         abort(401)
 
-    span.set_attribute(spanattrs.OIDC_CLAIMS, json.dumps(claims))
-
     session['oidc_user_id'] = claims['sub']
     email_claim = current_app.config.get('EMAIL_CLAIM', 'email')
     session['oidc_email'] = claims.get(email_claim, '')
@@ -157,10 +159,10 @@ def oidc():
     session['oidc_auth_at'] = int(time.time())
 
     span.add_event(spanattrs.USER_AUTHENTICATED, {
-        'sub': claims['sub'],
-        'email': claims.get(email_claim, ''),
-        'groups': claims.get(groups_claim, []),
-        'name': claims.get(name_claim, '')
+        user_attributes.USER_ID: claims['sub'],
+        user_attributes.USER_EMAIL: claims.get(email_claim, ''),
+        user_attributes.USER_ROLES: claims.get(groups_claim, []),
+        user_attributes.USER_FULL_NAME: claims.get(name_claim, '')
     })
     return redirect(next_path)
 
