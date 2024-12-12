@@ -1,5 +1,5 @@
 
-_OTEL_NAMESPACE = 'flask_easy_oidc'
+_OTEL_NAMESPACE = 'flask_oidc_auth'
 
 NEXT_PATH = f'{_OTEL_NAMESPACE}.next_path'
 
