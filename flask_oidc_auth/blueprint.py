@@ -61,10 +61,16 @@ def is_urlsafe_32_byte_token(token):
     return bool(re.match(r'^[A-Za-z0-9\-_]{43}$', token))
 
 
-@tracer.start_as_current_span('decode_jwt')
-def decode(token):
+@tracer.start_as_current_span('get_signing_key')
+def get_signing_key(token):
     jwks_client = current_app.extensions['oidc'].jwks_client
     signing_key = jwks_client.get_signing_key_from_jwt(token)
+    return signing_key.key
+
+
+@tracer.start_as_current_span('decode_jwt')
+def decode(token):
+    signing_key = get_signing_key(token)
     return jwt.decode(token, signing_key.key,
                       audience=current_app.config['CLIENT_ID'],
                       issuer=current_app.config['ISSUER'],
