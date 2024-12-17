@@ -7,3 +7,4 @@ build/
 cosmic-ray.html
 cosmic-ray.sqlite
 .vscode
+dist/

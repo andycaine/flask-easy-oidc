@@ -1,6 +1,6 @@
 [project]
 name = "flask-oidc-auth"
-version = "0.4.1"
+version = "0.5.0"
 description = "Flask extension for an OIDC client."
 dependencies = [
     "click", "flask", "requests", "PyJWT", "cryptography", "opentelemetry-api",
