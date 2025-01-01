@@ -1,5 +1,6 @@
 import enum
 import time
+import urllib.parse
 
 from flask import redirect, session, request, abort, current_app
 import jwt
@@ -41,7 +42,12 @@ class OidcExtension:
         app.extensions['oidc'] = self
 
     def redirect_to_login(self):
-        return redirect(f'{self.url_prefix}/login?next={request.path}')
+        next = urllib.parse.urlparse(f'{request.full_path}')
+        if next.netloc:
+            # should never happen, but just in case
+            redirect(f'{self.url_prefix}/login')
+        next_url = urllib.parse.quote_plus(next.geturl())
+        return redirect(f'{self.url_prefix}/login?next={next_url}')
 
     def authorize(self):
         if request.path in self.public_paths:

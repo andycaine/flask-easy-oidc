@@ -444,7 +444,20 @@ def test_get_public_url_without_login(client):
 def test_get_non_public_url_without_login(client):
     response = client.get('/secure')
     assert response.status_code == 302
-    assert response.headers['Location'] == '/auth/login?next=/secure'
+    assert response.headers['Location'] == '/auth/login?next=%2Fsecure'
+
+
+def test_login_redirect_with_params(client):
+    response = client.get('/secure?param1=value1&param2=value2')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/auth/login' \
+        '?next=%2Fsecure%3Fparam1%3Dvalue1%26param2%3Dvalue2'
+
+
+def test_login_redirect_with_evil_path(client):
+    response = client.get('/%2F%2Fevil.com')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/auth/login?next=%2Fevil.com'
 
 
 def test_get_url_allowed_by_pdp(client):
@@ -493,7 +506,7 @@ def test_session_timeout(client):
 
     response = client.get('/admin')
     assert response.status_code == 302
-    assert response.headers['Location'] == '/auth/login?next=/admin'
+    assert response.headers['Location'] == '/auth/login?next=%2Fadmin'
 
 
 @freezegun.freeze_time()
@@ -506,4 +519,4 @@ def test_session_expiry(client):
 
     response = client.get('/admin')
     assert response.status_code == 302
-    assert response.headers['Location'] == '/auth/login?next=/admin'
+    assert response.headers['Location'] == '/auth/login?next=%2Fadmin'
